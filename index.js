@@ -1,5 +1,8 @@
+console.log("Starting server...");
+
 const express = require("express");
 const mysql = require("mysql2/promise");
+const jwt = require("jsonwebtoken");
 
 const app = express();
 app.use(express.json());
@@ -11,6 +14,8 @@ const DB_CONFIG = {
   database: "todo_db", 
 };
 
+const SECRET_KEY = "your-secret-key"; // Replace with a secure key in production
+
 // Function to initialize the database
 async function initializeDatabase() {
   const connection = await mysql.createConnection({
@@ -19,14 +24,11 @@ async function initializeDatabase() {
     password: DB_CONFIG.password,
   });
 
-  // Creates database if it doesn't exist
   await connection.query(`CREATE DATABASE IF NOT EXISTS ${DB_CONFIG.database}`);
   await connection.end();
 
-  // Connects to the database
   const db = await mysql.createConnection(DB_CONFIG);
 
-  // Creates the tasks table if it doesn't exist
   await db.query(`
     CREATE TABLE IF NOT EXISTS tasks (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -36,15 +38,50 @@ async function initializeDatabase() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
   console.log("Database and table initialized.");
   return db;
 }
 
-// Middleware to connect to the database
+// Middleware to connect to database
 let db;
 initializeDatabase().then((connection) => {
   db = connection;
 });
+
+// Middleware to authenticate JWTs
+function authenticateToken(req, res, next) {
+  const token = req.headers["authorization"]?.split(" ")[1];
+  if (!token) return res.status(401).json({ error: "Access denied. No token provided." });
+
+  jwt.verify(token, SECRET_KEY, (err, user) => {
+    if (err) return res.status(403).json({ error: "Invalid token." });
+    req.user = user; /* Attach decoded user data to request*/
+    next();
+  });
+}
+
+// Static credentials for login
+const STATIC_CREDENTIALS = {
+  username: "admin",
+  password: "password123", /*Replace with a secure password in production*/
+};
+
+// Login endpoint to issue JWT tokens
+app.post("/login", (req, res) => {
+  const { username, password } = req.body;
+
+  if (username === STATIC_CREDENTIALS.username && password === STATIC_CREDENTIALS.password) {
+    const token = jwt.sign({ username }, SECRET_KEY, { expiresIn: "1h" }); // Generate JWT
+    return res.json({ token });
+  }
+
+  res.status(401).json({ error: "Invalid credentials." });
+});
+
+// Protect task endpoints with JWT middleware
+app.use("/tasks", authenticateToken);
+
 
 //Features of application:
 // 1. Create a new task
@@ -64,6 +101,7 @@ app.post("/tasks", async (req, res) => {
   }
 });
 
+
 // 2. Fetch all tasks
 app.get("/tasks", async (req, res) => {
   try {
@@ -74,6 +112,7 @@ app.get("/tasks", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch tasks." });
   }
 });
+
 
 // 3. Fetch a task by ID
 app.get("/tasks/:id", async (req, res) => {
@@ -90,6 +129,7 @@ app.get("/tasks/:id", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch task." });
   }
 });
+
 
 // 4. Update task status
 app.put("/tasks/:id", async (req, res) => {
@@ -113,6 +153,7 @@ app.put("/tasks/:id", async (req, res) => {
   }
 });
 
+
 // 5. Delete a task by ID
 app.delete("/tasks/:id", async (req, res) => {
   const { id } = req.params;
@@ -130,7 +171,7 @@ app.delete("/tasks/:id", async (req, res) => {
 });
 
 // Start the server
-const PORT = 3000;
+const PORT = 4002;
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });
